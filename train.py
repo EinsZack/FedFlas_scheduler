@@ -315,10 +315,13 @@ def test_agent_allocation(
 
         # 提取最终的 Makespan
         final_makespan = info[0].get('makespan', 'N/A')
+        allocation = info[0].get('allocation', 'N/A')
+        client_time_list = info[0].get('client_time_list', 'N/A')
 
         print(f"\n--- Episode {episode + 1} ---")
         print(f"  总步骤数 (Total Steps): {step}")
         print(f"  最终 Makespan (Final Makespan): {final_makespan:.4f}")
+        print(f"  最终各个设备时延 (Device Makespans): {client_time_list}")
         print(f"  ES 分配序列 (Allocation Sequence):")
         # 打印序列，每10个换行，方便查看负载均衡情况
 
@@ -501,32 +504,32 @@ if __name__ == '__main__':
     # ES_list.append(Env.ES(7, 735531))
     # ES_list.append(Env.ES(8, 405849))
     # scene3
-    # client_list.append(Env.Client(1, 42864, 87))
-    # client_list.append(Env.Client(2, 35813, 89))
-    # client_list.append(Env.Client(3, 43798, 89))
-    # client_list.append(Env.Client(4, 43290, 98))
-    # client_list.append(Env.Client(5, 37754, 98))
-    # client_list.append(Env.Client(6, 42590, 92))
-    # client_list.append(Env.Client(7, 38999, 98))
-    # client_list.append(Env.Client(8, 36477, 87))
-    # client_list.append(Env.Client(9, 49122, 98))
-    # client_list.append(Env.Client(10, 33303, 98))  #
-    # ES_list.append(Env.ES(21, 621409))
-    # ES_list.append(Env.ES(22, 735531))
-    # ES_list.append(Env.ES(23, 405849))
-    # ES_list.append(Env.ES(24, 460893))
-    # ES_list.append(Env.ES(25, 534774))
+    client_list.append(Env.Client(1, 42864, 87))
+    client_list.append(Env.Client(2, 35813, 89))
+    client_list.append(Env.Client(3, 43798, 89))
+    client_list.append(Env.Client(4, 43290, 98))
+    client_list.append(Env.Client(5, 37754, 98))
+    client_list.append(Env.Client(6, 42590, 92))
+    client_list.append(Env.Client(7, 38999, 98))
+    client_list.append(Env.Client(8, 36477, 87))
+    client_list.append(Env.Client(9, 49122, 98))
+    client_list.append(Env.Client(10, 33303, 98))  #
+    ES_list.append(Env.ES(21, 621409))
+    ES_list.append(Env.ES(22, 735531))
+    ES_list.append(Env.ES(23, 405849))
+    ES_list.append(Env.ES(24, 460893))
+    ES_list.append(Env.ES(25, 534774))
 
     # ================这一半是CIFAR10的数据量设定================
     # scene1
-    client_list.append(Env.Client(1, 42864, 242))
-    client_list.append(Env.Client(2, 35813, 282)) #
-    client_list.append(Env.Client(3, 43798, 256))
-    ES_list.append(Env.ES(11, 621409))
-    ES_list.append(Env.ES(12, 735531))
-    ES_list.append(Env.ES(13, 405849))
-    ES_list.append(Env.ES(14, 460893))
-    ES_list.append(Env.ES(15, 534774))
+    # client_list.append(Env.Client(1, 42864, 242))
+    # client_list.append(Env.Client(2, 35813, 282)) #
+    # client_list.append(Env.Client(3, 43798, 256))
+    # ES_list.append(Env.ES(11, 621409))
+    # ES_list.append(Env.ES(12, 735531))
+    # ES_list.append(Env.ES(13, 405849))
+    # ES_list.append(Env.ES(14, 460893))
+    # ES_list.append(Env.ES(15, 534774))
     # scene2
     # client_list.append(Env.Client(1, 42864, 160))
     # client_list.append(Env.Client(2, 35813, 187))
@@ -633,7 +636,7 @@ if __name__ == '__main__':
     # ES_list.append(Env.ES(29, 761315))
     # ES_list.append(Env.ES(30, 408975))
 
-    model_type = "cifar10"
+    model_type = "mnist"
     bandwidth = 10
 
 
@@ -694,6 +697,14 @@ if __name__ == '__main__':
         )
     else:
         print(f"❌ 最佳模型文件未找到: {BEST_PPO_MODEL_PATH}，请先运行训练。")
+
+    print("对比初始GWO的分配方案：")
+    print(init_dist)
+    env = gymEnv.GymPPOEnv(ES_list, client_list, split_num_list, model_type=model_type, bandwidth=bandwidth)
+    init_time, client_time_list = env.calculate_makespan_for_allocation(init_dist)
+    print(f"初始分配方案的Makespan: {init_time}")
+    print(client_time_list)
+
 
     # 训练 SAC (例如 100,000 步)
     # sac_path = train_sac_agent(

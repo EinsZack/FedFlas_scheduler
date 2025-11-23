@@ -33,9 +33,13 @@ class GymPPOEnv(gym.Env):
             self.devices_speed_matrix[i, 0] = self.devices_speed_map[client.rank]
         self.client_flops = self.devices_speed_matrix[:, 0]  # Client的处理速度数组
         self.es_flops = self.devices_speed_matrix[0, 1:]  # ES的处理速度数组
-        self.comp_loads = np.zeros(self.N + self.M, dtype=np.float32)  # 每个设备当前的计算负载
-        self.trans_loads = np.zeros(self.N + self.M, dtype=np.float32)  # 传输负载只算在Client端
         self.device_flops = np.concatenate((self.client_flops, self.es_flops))  # 所有设备的处理速度数组
+
+        self.comp_loads = np.zeros(self.N + self.M, dtype=np.float32)  # 每个设备当前的计算负载
+        # self.trans_loads = np.zeros(self.N + self.M, dtype=np.float32)  # 传输负载只算在Client端
+        # 传输负载改为 (N, M) 矩阵，行是Client，列是ES。本地设备(0号)不产生传输负载，故只记录M个ES
+        self.trans_loads = np.zeros((self.N, self.M), dtype=np.float32)
+
         # 数据库
         self.database = Database()
         # 估计路径算力开销
@@ -133,7 +137,7 @@ class GymPPOEnv(gym.Env):
         self.final_makespan = 0.0
         self.allocation = np.zeros((self.N, self.num_devices), dtype=np.int32)  # 每个Client分配到每个设备的路径数量
         self.comp_loads = np.zeros(self.N + self.M, dtype=np.float32)
-        self.trans_loads = np.zeros(self.N + self.M, dtype=np.float32)
+        self.trans_loads = np.zeros((self.N, self.M), dtype=np.float32) # 重置为 N*M 零矩阵
         self.time_loads = np.zeros(self.N + self.M, dtype=np.float32)
         self.current_step = 0
 
@@ -147,48 +151,76 @@ class GymPPOEnv(gym.Env):
 
         return observation, info
 
+    # def _get_obs(self):
+    #     # 当前路径id、全局计算负载、全局传输负载、全局时间负载
+    #     client_id = self.path_queue[self.current_step] if self.current_step < self.total_paths else 0  # 所属的client
+    #     comp_time = self.comp_loads / self.device_flops  # 全局的计算时间负载 N + M
+    #     trans_time = self.trans_loads / self.global_bandwidth  # 全局的传输时间负载 N + M
+    #     trans_time[0:self.N] = 0.0  # Client端不计算传输时间
+    #     time_loads = comp_time + trans_time  # 全局的时间负载 N + M
+    #
+    #     # 取time_loads后M个为ES的时间负载
+    #     es_time_loads = time_loads[self.N:]  # M
+    #     # 取client_id为当前client的时间负载
+    #     current_client_time_load = time_loads[client_id]  # 1
+    #     # 拼接当前client的时间负载和ES的时间负载
+    #     current_time_loads = np.concatenate(([current_client_time_load], es_time_loads))
+    #     # 取当前设备算力
+    #     current_client_flop = self.client_flops[client_id]
+    #     # 拼接当前client的算力和ES的算力
+    #     current_flops = np.concatenate(([current_client_flop], self.es_flops))
+    #
+    #     if self.current_step >= self.total_paths:
+    #         current_comp = 0.0  # 已经完成分配，当前路径开销为0
+    #         current_trans = 0.0  # 同理
+    #         # bandwidths = np.full(self.num_devices, self.max_bandwidth, dtype=np.float32)
+    #
+    #     else:
+    #         current_comp = self.path_comp_array[self.current_step]  #
+    #         current_trans = self.path_trans_array[self.current_step]
+    #         # bandwidths = self.bandwidth_matrix[client_id]
+    #
+    #
+    #     return np.concatenate([
+    #         [current_comp],  # 1
+    #         [current_trans],  # 1
+    #         # time_loads,  # N + M
+    #         # es_time_loads,  # M
+    #         current_time_loads,  # 1 + M
+    #         # return_loads,  # 1 + M
+    #         # self.device_flops, # N + M
+    #         current_flops,  # 1 + M
+    #         # return_flops,  # 1 + M
+    #         # client_onehot  # N + M
+    #     ]).astype(np.float32)
+
     def _get_obs(self):
-        # 当前路径id、全局计算负载、全局传输负载、全局时间负载
         client_id = self.path_queue[self.current_step] if self.current_step < self.total_paths else 0  # 所属的client
         comp_time = self.comp_loads / self.device_flops  # 全局的计算时间负载 N + M
-        trans_time = self.trans_loads / self.global_bandwidth  # 全局的传输时间负载 N + M
-        trans_time[0:self.N] = 0.0  # Client端不计算传输时间
-        time_loads = comp_time + trans_time  # 全局的时间负载 N + M
-
-        # 取time_loads后M个为ES的时间负载
-        es_time_loads = time_loads[self.N:]  # M
-        # 取client_id为当前client的时间负载
-        current_client_time_load = time_loads[client_id]  # 1
-        # 拼接当前client的时间负载和ES的时间负载
-        current_time_loads = np.concatenate(([current_client_time_load], es_time_loads))
-        # 取当前设备算力
-        current_client_flop = self.client_flops[client_id]
-        # 拼接当前client的算力和ES的算力
-        current_flops = np.concatenate(([current_client_flop], self.es_flops))
-
+        current_client_trans_load = self.trans_loads[client_id]
+        trans_time_es = current_client_trans_load / self.global_bandwidth
+        es_comp_time = comp_time[self.N:]  # 取出 M 个 ES 的计算时间
+        es_time_loads = es_comp_time + trans_time_es  # (M,)
+        current_client_local_time = comp_time[client_id]  # (1,)
+        current_time_loads = np.concatenate(([current_client_local_time], es_time_loads))
+        # 4. 获取当前任务的开销
         if self.current_step >= self.total_paths:
-            current_comp = 0.0  # 已经完成分配，当前路径开销为0
-            current_trans = 0.0  # 同理
-            # bandwidths = np.full(self.num_devices, self.max_bandwidth, dtype=np.float32)
-
+            current_comp = 0.0
+            current_trans = 0.0
         else:
-            current_comp = self.path_comp_array[self.current_step]  #
+            current_comp = self.path_comp_array[self.current_step]
             current_trans = self.path_trans_array[self.current_step]
-            # bandwidths = self.bandwidth_matrix[client_id]
 
-
+        # 5. 获取当前设备的算力 (1 + M)
+        current_client_flop = self.client_flops[client_id]
+        current_flops = np.concatenate(([current_client_flop], self.es_flops))
         return np.concatenate([
             [current_comp],  # 1
             [current_trans],  # 1
-            # time_loads,  # N + M
-            # es_time_loads,  # M
             current_time_loads,  # 1 + M
-            # return_loads,  # 1 + M
-            # self.device_flops, # N + M
-            current_flops,  # 1 + M
-            # return_flops,  # 1 + M
-            # client_onehot  # N + M
+            current_flops,  # 1+M
         ]).astype(np.float32)
+
 
     def _calculate_makespan(self):
         # 由于真实的全局时延时分阶段计算的，这里需要读取当前的分配矩阵，计算每个客户端的时间开销，再取最大值
@@ -273,8 +305,7 @@ class GymPPOEnv(gym.Env):
         return makespan, client_time_list, load_std
 
     def calculate_makespan_for_allocation(self,
-                                          allocation_matrix: np.ndarray,
-                                          batches_list: List[int]) -> Tuple[float, float]:
+                                          allocation_matrix: np.ndarray) -> Tuple[float, np.ndarray]:
         """
         计算给定全局分配矩阵下的最终 Makespan 和负载标准差。
         此方法不依赖于环境的 current_step 或内部 self.allocation 状态。
@@ -324,7 +355,7 @@ class GymPPOEnv(gym.Env):
         # 3. 计算每个客户端的总时延 (Makespan)
         for client_id, s in enumerate(self.split_num_list):
             client_dist = allocation_matrix[client_id]  # (M+1) 分配向量
-            b = batches_list[client_id]  # 批次数量
+            b = self.batches_list[client_id]  # 批次数量
 
             # --- Phase 1 ---
             trans1 = self.database.get_transsize((s, 0), self.model_type) + self.database.get_transsize((s, 1),
@@ -363,20 +394,20 @@ class GymPPOEnv(gym.Env):
         makespan = max(client_time_list)
 
         # 5. 计算负载标准差 (Load Standard Deviation)
-        es_total_loads = es_comp1_loads + es_comp4_loads
-        es_time_loads = es_total_loads / self.es_flops  # ES侧的时间负载
+        # es_total_loads = es_comp1_loads + es_comp4_loads
+        # es_time_loads = es_total_loads / self.es_flops  # ES侧的时间负载
 
         # 客户端总负载（只取本地设备部分）
-        client_total_loads_list = [c1[0] + c4[0] for c1, c4 in zip(client_comp1_list, client_comp4_list)]
-        client_time_loads = np.array(client_total_loads_list) / self.client_flops
+        # client_total_loads_list = [c1[0] + c4[0] for c1, c4 in zip(client_comp1_list, client_comp4_list)]
+        # client_time_loads = np.array(client_total_loads_list) / self.client_flops
 
         # 负载标准差只关心客户端中最大的负载和ES的总负载
-        ctl = np.max(client_time_loads)
-        time_load_list = np.concatenate(([ctl], es_time_loads))
+        # ctl = np.max(client_time_loads)
+        # time_load_list = np.concatenate(([ctl], es_time_loads))
 
-        load_std = np.std(time_load_list)
+        # load_std = np.std(time_load_list)
 
-        return makespan, load_std
+        return makespan, client_time_list
 
     def _get_reward(self, old_makespan, new_makespan, old_client_time_list, new_client_time_list, old_std, new_std, client_id):
 
@@ -431,8 +462,11 @@ class GymPPOEnv(gym.Env):
             self.allocation[client_id, es_id + 1] += 1
             self.comp_loads[global_device_id] += comp_cost
             # 传输时延只计算首次分配的量
-            if self.trans_loads[global_device_id] == 0.0:
-                self.trans_loads[global_device_id] += trans_cost
+            # if self.trans_loads[global_device_id] == 0.0:  # 这里有问题，这个需要按照客户端区分，别的客户端你的传输时延不能相互算，只有计算时延可以这样算
+            #     self.trans_loads[global_device_id] += trans_cost
+
+            if self.trans_loads[client_id, es_id] == 0.0:  # 新的矩阵版本的传输负载更新
+                self.trans_loads[client_id, es_id] += trans_cost
 
         # 只卸载es，不卸载client的策略
         # offload_to = action + 1
@@ -461,7 +495,8 @@ class GymPPOEnv(gym.Env):
             "makespan": new_makespan,
             "client_id": client_id,
             "action": action,
-            "allocation": self.allocation.copy()
+            "allocation": self.allocation.copy(),
+            "client_time_list": new_client_time_list,
         }
 
     def render(self, mode='human'):
