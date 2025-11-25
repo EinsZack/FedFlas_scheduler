@@ -7,9 +7,10 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from torch.utils.data import get_worker_info
 
 from scheduler_1115.envs import gymEnv, Env
-from scheduler_1115.envs import GWOEnv
+from scheduler_1115.envs import GWOEnv, NewGWOEnv
 import FedServer_agent
 from scheduler_1115.GWO.Splitor import Splitor
+from scheduler_1115.GWO.Splitor_all import Splitor_All
 from utils_DQN import *
 # from Splitor_RS_PPO import Splitor_RS_PPO, PPOAgent
 import matplotlib.pyplot as plt
@@ -504,21 +505,21 @@ if __name__ == '__main__':
     # ES_list.append(Env.ES(7, 735531))
     # ES_list.append(Env.ES(8, 405849))
     # scene3
-    client_list.append(Env.Client(1, 42864, 87))
-    client_list.append(Env.Client(2, 35813, 89))
-    client_list.append(Env.Client(3, 43798, 89))
-    client_list.append(Env.Client(4, 43290, 98))
-    client_list.append(Env.Client(5, 37754, 98))
-    client_list.append(Env.Client(6, 42590, 92))
-    client_list.append(Env.Client(7, 38999, 98))
-    client_list.append(Env.Client(8, 36477, 87))
-    client_list.append(Env.Client(9, 49122, 98))
-    client_list.append(Env.Client(10, 33303, 98))  #
-    ES_list.append(Env.ES(21, 621409))
-    ES_list.append(Env.ES(22, 735531))
-    ES_list.append(Env.ES(23, 405849))
-    ES_list.append(Env.ES(24, 460893))
-    ES_list.append(Env.ES(25, 534774))
+    # client_list.append(Env.Client(1, 42864, 87))
+    # client_list.append(Env.Client(2, 35813, 89))
+    # client_list.append(Env.Client(3, 43798, 89))
+    # client_list.append(Env.Client(4, 43290, 98))
+    # client_list.append(Env.Client(5, 37754, 98))
+    # client_list.append(Env.Client(6, 42590, 92))
+    # client_list.append(Env.Client(7, 38999, 98))
+    # client_list.append(Env.Client(8, 36477, 87))
+    # client_list.append(Env.Client(9, 49122, 98))
+    # client_list.append(Env.Client(10, 33303, 98))  #
+    # ES_list.append(Env.ES(21, 621409))
+    # ES_list.append(Env.ES(22, 735531))
+    # ES_list.append(Env.ES(23, 405849))
+    # ES_list.append(Env.ES(24, 460893))
+    # ES_list.append(Env.ES(25, 534774))
 
     # ================这一半是CIFAR10的数据量设定================
     # scene1
@@ -597,14 +598,14 @@ if __name__ == '__main__':
     # ES_list.append(Env.ES(25, 534774))
     # ================这一半是CIFAR100的数据量设定================
     # scene1
-    # client_list.append(Env.Client(1, 42864, 243))
-    # client_list.append(Env.Client(2, 35813, 264)) #
-    # client_list.append(Env.Client(3, 43798, 273))
-    # ES_list.append(Env.ES(11, 621409))
-    # ES_list.append(Env.ES(12, 735531))
-    # ES_list.append(Env.ES(13, 405849))
-    # ES_list.append(Env.ES(14, 460893))
-    # ES_list.append(Env.ES(15, 534774))
+    client_list.append(Env.Client(1, 42864, 243))
+    client_list.append(Env.Client(2, 35813, 264)) #
+    client_list.append(Env.Client(3, 43798, 273))
+    ES_list.append(Env.ES(11, 621409))
+    ES_list.append(Env.ES(12, 735531))
+    ES_list.append(Env.ES(13, 405849))
+    ES_list.append(Env.ES(14, 460893))
+    ES_list.append(Env.ES(15, 534774))
     # scene2
     # client_list.append(Env.Client(1, 42864, 160))
     # client_list.append(Env.Client(2, 35813, 161)) #
@@ -636,16 +637,22 @@ if __name__ == '__main__':
     # ES_list.append(Env.ES(29, 761315))
     # ES_list.append(Env.ES(30, 408975))
 
-    model_type = "mnist"
-    bandwidth = 10
+    model_type = "cifar100"
+    bandwidth = 30
 
 
     # 创建Env，将设备信息传入给Env
-    gwoenv = GWOEnv.TaskAssignmentEnv(ES_list, client_list, model_type, bandwidth)  # 专门用于GWO的Env，后面再改
+    # gwoenv = GWOEnv.TaskAssignmentEnv(ES_list, client_list, model_type, bandwidth)  # 专门用于GWO的Env，后面再改
+    gwoenv = NewGWOEnv.TaskAssignmentEnv(ES_list, client_list,None, model_type, bandwidth)  # 专门用于GWO的Env，后面再改
 
     # 创建Splitor，作为第一阶段决定路径切分数量
-    splitor = Splitor(ES_list, client_list, gwoenv)
-    split_num_list, init_dist = splitor.get_split_numlist()
+    # splitor = Splitor(ES_list, client_list, gwoenv)
+    # split_num_list, init_dist = splitor.get_split_numlist()
+    # split_num_list = split_num_list.astype(int)
+
+    # splitor_all
+    splitor_all = Splitor_All(ES_list, client_list, gwoenv)
+    split_num_list, init_dist = splitor_all.get_split_numlist()
     split_num_list = split_num_list.astype(int)
 
 
@@ -655,7 +662,7 @@ if __name__ == '__main__':
         client_list,
         split_num_list,
         model_type=model_type,
-        total_timesteps=100000,
+        total_timesteps=150000,
         bandwidth=bandwidth
     )
 
