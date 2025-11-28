@@ -151,48 +151,6 @@ class GymPPOEnv(gym.Env):
 
         return observation, info
 
-    # def _get_obs(self):
-    #     # 当前路径id、全局计算负载、全局传输负载、全局时间负载
-    #     client_id = self.path_queue[self.current_step] if self.current_step < self.total_paths else 0  # 所属的client
-    #     comp_time = self.comp_loads / self.device_flops  # 全局的计算时间负载 N + M
-    #     trans_time = self.trans_loads / self.global_bandwidth  # 全局的传输时间负载 N + M
-    #     trans_time[0:self.N] = 0.0  # Client端不计算传输时间
-    #     time_loads = comp_time + trans_time  # 全局的时间负载 N + M
-    #
-    #     # 取time_loads后M个为ES的时间负载
-    #     es_time_loads = time_loads[self.N:]  # M
-    #     # 取client_id为当前client的时间负载
-    #     current_client_time_load = time_loads[client_id]  # 1
-    #     # 拼接当前client的时间负载和ES的时间负载
-    #     current_time_loads = np.concatenate(([current_client_time_load], es_time_loads))
-    #     # 取当前设备算力
-    #     current_client_flop = self.client_flops[client_id]
-    #     # 拼接当前client的算力和ES的算力
-    #     current_flops = np.concatenate(([current_client_flop], self.es_flops))
-    #
-    #     if self.current_step >= self.total_paths:
-    #         current_comp = 0.0  # 已经完成分配，当前路径开销为0
-    #         current_trans = 0.0  # 同理
-    #         # bandwidths = np.full(self.num_devices, self.max_bandwidth, dtype=np.float32)
-    #
-    #     else:
-    #         current_comp = self.path_comp_array[self.current_step]  #
-    #         current_trans = self.path_trans_array[self.current_step]
-    #         # bandwidths = self.bandwidth_matrix[client_id]
-    #
-    #
-    #     return np.concatenate([
-    #         [current_comp],  # 1
-    #         [current_trans],  # 1
-    #         # time_loads,  # N + M
-    #         # es_time_loads,  # M
-    #         current_time_loads,  # 1 + M
-    #         # return_loads,  # 1 + M
-    #         # self.device_flops, # N + M
-    #         current_flops,  # 1 + M
-    #         # return_flops,  # 1 + M
-    #         # client_onehot  # N + M
-    #     ]).astype(np.float32)
 
     def _get_obs(self):
         client_id = self.path_queue[self.current_step] if self.current_step < self.total_paths else 0  # 所属的client
@@ -361,8 +319,11 @@ class GymPPOEnv(gym.Env):
             trans1 = self.database.get_transsize((s, 0), self.model_type) + self.database.get_transsize((s, 1),
                                                                                                         self.model_type)
             comp_loads_1 = client_comp1_list[client_id]
-            trans_loads_1 = trans1 * client_dist
+            trans_mask1 = np.where(client_dist > 0, 1.0, 0.0)
+            trans_loads_1 = trans1 * trans_mask1
             trans_loads_1[0] = 0.0  # 本地设备不计算传输
+            # trans_loads_1 = trans1 * client_dist
+            # trans_loads_1[0] = 0.0  # 本地设备不计算传输
 
             # 时延 = 计算时延 + 传输时延 (元素级计算)
             time_phase1 = (comp_loads_1 / self.devices_speed_matrix[client_id]) + \
@@ -378,8 +339,11 @@ class GymPPOEnv(gym.Env):
             trans4 = self.database.get_transsize((s, 2), self.model_type) + self.database.get_transsize((s, 3),
                                                                                                         self.model_type)
             comp_loads_4 = client_comp4_list[client_id]
-            trans_loads_4 = trans4 * client_dist
-            trans_loads_4[0] = 0.0  # 本地设备不计算传输
+            trans_mask2 = np.where(client_dist > 0, 1.0, 0.0)
+            trans_loads_4 = trans4 * trans_mask2 # 同理
+            trans_loads_4[0] = 0.0
+            # trans_loads_4 = trans4 * client_dist
+            # trans_loads_4[0] = 0.0  # 本地设备不计算传输
 
             # 时延 = 计算时延 + 传输时延 (元素级计算)
             time_phase4 = (comp_loads_4 / self.devices_speed_matrix[client_id]) + \
@@ -409,6 +373,10 @@ class GymPPOEnv(gym.Env):
 
         return makespan, client_time_list
 
+    def _calculate_system_metrics(self, allocation_matrix, split_nums_override=None):  # 一个和外部调用兼容用的接口，实际上就是调用calculate_makespan_for_allocation
+        makespan, client_time_list = self.calculate_makespan_for_allocation(allocation_matrix)
+        return makespan, client_time_list
+
     def _get_reward(self, old_makespan, new_makespan, old_client_time_list, new_client_time_list, old_std, new_std, client_id):
 
         if self.current_step == 0:
@@ -421,9 +389,9 @@ class GymPPOEnv(gym.Env):
             # 2. 全局 makespan 改善（稀疏信号）
             makespan_improve = -(new_makespan - old_makespan)
             # 3. 负载均衡奖励（鼓励 ES 均衡）
-            load_balance_reward = (old_std - new_std) * 300
+            load_balance_reward = (old_std - new_std) * 300  # 300
             # 4. 全局makespan绝对值（持续奖励，避免由首次分配导致的后续奖励稀疏问题）
-            makespan_absolute_reward = -new_makespan * 0.1  # 目前设为0，不启用
+            makespan_absolute_reward = -new_makespan * 0.2  # 目前设为0，不启用0.15
 
             reward = client_improve + makespan_improve + load_balance_reward + makespan_absolute_reward
         return reward
@@ -475,6 +443,8 @@ class GymPPOEnv(gym.Env):
         # self.trans_loads[self.N + action] += trans_cost
 
         new_makespan, new_client_time_list, new_std = self._calculate_makespan()
+        # 测试另一个计算时间是否一致
+        # test_makespan, _ = self.calculate_makespan_for_allocation(self.allocation)
 
         # 计算奖励
         reward = self._get_reward(old_makespan, new_makespan, old_client_time_list, new_client_time_list, old_std, new_std, client_id)

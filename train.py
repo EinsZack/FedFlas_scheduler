@@ -7,7 +7,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from torch.utils.data import get_worker_info
 
 from scheduler_1115.envs import gymEnv, Env
-from scheduler_1115.envs import GWOEnv, NewGWOEnv
+from scheduler_1115.envs import GWOEnv, NewGWOEnv, GWOEnvV3
 import FedServer_agent
 from scheduler_1115.GWO.Splitor import Splitor
 from scheduler_1115.GWO.Splitor_all import Splitor_All
@@ -18,6 +18,11 @@ from stable_baselines3 import PPO, SAC, DQN
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, BaseCallback
 from stable_baselines3.common.results_plotter import load_results, ts2xy
+from baseline.splitor_allrandom import Splitor_all_random
+from baseline.splitor_rsuo import Splitor_random_uniform_es_only
+from baseline.splitor_rsgo import Splitor_RS_GO
+from baseline.DQN_solver import train_dqn_end2end, test_dqn_end2end
+from baseline.SAC_solver import train_sac_fixed_split, test_sac_fixed_split
 
 
 # def train_ppo_agent(ES_list, client_list, split_num_list, model_type="cifar100", total_timesteps=20000):
@@ -100,7 +105,7 @@ def train_ppo_agent(ES_list, client_list, split_num_list, model_type="cifar100",
     # --- 1. 环境准备 ---
     # 训练环境 (Training Environment)
     def make_ppo_env():
-        env = gymEnv.GymPPOEnv(ES_list, client_list, split_num_list, model_type=model_type,bandwidth=bandwidth)
+        env = gymEnv.GymPPOEnv(ES_list, client_list, split_num_list, model_type=model_type, bandwidth=bandwidth)
         return Monitor(env)
 
     vec_env = make_vec_env(make_ppo_env, n_envs=1, vec_env_cls=DummyVecEnv)
@@ -241,7 +246,7 @@ def test_agent_allocation(
 
     # --- 1. 准备测试环境 ---
     def make_test_env():
-        env = gymEnv.GymPPOEnv(ES_list, client_list, split_num_list, model_type=model_type,bandwidth=bandwidth)
+        env = gymEnv.GymPPOEnv(ES_list, client_list, split_num_list, model_type=model_type, bandwidth=bandwidth)
         return Monitor(env)
 
     vec_env = make_vec_env(make_test_env, n_envs=1, vec_env_cls=DummyVecEnv)
@@ -477,6 +482,7 @@ def train_dqn_agent(ES_list, client_list, split_num_list, model_type="cifar100",
 
     return final_model_path
 
+
 if __name__ == '__main__':
     # 一些参数
     num_tasks = 16
@@ -599,7 +605,7 @@ if __name__ == '__main__':
     # ================这一半是CIFAR100的数据量设定================
     # scene1
     client_list.append(Env.Client(1, 42864, 243))
-    client_list.append(Env.Client(2, 35813, 264)) #
+    client_list.append(Env.Client(2, 35813, 264))  #
     client_list.append(Env.Client(3, 43798, 273))
     ES_list.append(Env.ES(11, 621409))
     ES_list.append(Env.ES(12, 735531))
@@ -638,80 +644,130 @@ if __name__ == '__main__':
     # ES_list.append(Env.ES(30, 408975))
 
     model_type = "cifar100"
-    bandwidth = 30
-
-
+    bandwidth = 15
     # 创建Env，将设备信息传入给Env
     # gwoenv = GWOEnv.TaskAssignmentEnv(ES_list, client_list, model_type, bandwidth)  # 专门用于GWO的Env，后面再改
-    gwoenv = NewGWOEnv.TaskAssignmentEnv(ES_list, client_list,None, model_type, bandwidth)  # 专门用于GWO的Env，后面再改
+    gwoenv = NewGWOEnv.TaskAssignmentEnv(ES_list, client_list, None, model_type, bandwidth)  # 专门用于GWO的Env，后面再改
+    # gymenv = gymEnv.GymPPOEnv(ES_list, client_list, None, model_type=model_type, bandwidth=bandwidth)
 
     # 创建Splitor，作为第一阶段决定路径切分数量
     # splitor = Splitor(ES_list, client_list, gwoenv)
     # split_num_list, init_dist = splitor.get_split_numlist()
     # split_num_list = split_num_list.astype(int)
 
-    # splitor_all
+    # splitor_all  # GWO方法
     splitor_all = Splitor_All(ES_list, client_list, gwoenv)
     split_num_list, init_dist = splitor_all.get_split_numlist()
     split_num_list = split_num_list.astype(int)
 
+    # RS+RO方法
+    # splitor_rsro = Splitor_all_random(ES_list, client_list, gwoenv)
+    # avg_makespan, best_config = splitor_rsro.run_simulation(10000)
+
+    # RS+UO方法
+    # splitor_rsuo = Splitor_random_uniform_es_only(ES_list, client_list, gwoenv)
+    # avg_makespan1, best_config1 = splitor_rsuo.run_simulation(10000)
+
+    # RS+GO方法
+    # splitor_rsgo = Splitor_RS_GO(ES_list, client_list, gwoenv)
+    # avg_makespan2, best_config2 = splitor_rsgo.run_simulation(10000)
+
+    # DQN方法
+    # solver_dqn = train_dqn_end2end(gwoenv, total_timesteps=8000)
+    # best_global_makespan1, best_global_alloc1 = test_dqn_end2end("./models/dqn_fixed/final_dqn_fixed_model.zip", gwoenv, split_num_list, num_episodes=10)
+
+    # SAC方法
+    # solver_sac = train_sac_fixed_split(gwoenv, total_timesteps=8000)
+    # best_global_makespan2, best_global_alloc2 = test_sac_fixed_split("./models/sac_fixed/final_sac_fixed_model.zip", gwoenv, split_num_list, num_episodes=10)
 
     # 训练PPO智能体
-    final_ppo_model_path = train_ppo_agent(
-        ES_list,
-        client_list,
-        split_num_list,
-        model_type=model_type,
-        total_timesteps=150000,
-        bandwidth=bandwidth
-    )
-
-    PPO_BASE_DIR = "./models/ppo_agent"
-    BEST_PPO_MODEL_PATH = os.path.join(PPO_BASE_DIR, "best_model", "best_model.zip")
-
-
-    if os.path.exists(BEST_PPO_MODEL_PATH):
-        # --- 测试确定性模式 (检查是否集中分配) ---
-        print("\n" + "#" * 60)
-        print("### 模式一：Deterministic=True (集中分配检查) ###")
-        print("#" * 60)
-        test_agent_allocation(
-            model_path=BEST_PPO_MODEL_PATH,
-            algorithm_cls=PPO,
-            ES_list=ES_list,
-            client_list=client_list,
-            split_num_list=split_num_list,
-            model_type=model_type,
-            test_episodes=5,
-            deterministic=True,  # 检查只选一个ES的问题
-            bandwidth=bandwidth
-        )
-
-        # --- 测试随机模式 (检查负载均衡) ---
-        print("\n" + "#" * 60)
-        print("### 模式二：Deterministic=False (均衡分配检查) ###")
-        print("#" * 60)
-        test_agent_allocation(
-            model_path=BEST_PPO_MODEL_PATH,
-            algorithm_cls=PPO,
-            ES_list=ES_list,
-            client_list=client_list,
-            split_num_list=split_num_list,
-            model_type=model_type,
-            test_episodes=5,
-            deterministic=False,  # 检查是否能分散分配
-            bandwidth = bandwidth
-        )
-    else:
-        print(f"❌ 最佳模型文件未找到: {BEST_PPO_MODEL_PATH}，请先运行训练。")
+    # final_ppo_model_path = train_ppo_agent(
+    #     ES_list,
+    #     client_list,
+    #     split_num_list,
+    #     model_type=model_type,
+    #     total_timesteps=200000,
+    #     bandwidth=bandwidth
+    # )
+    #
+    # PPO_BASE_DIR = "./models/ppo_agent"
+    # BEST_PPO_MODEL_PATH = os.path.join(PPO_BASE_DIR, "best_model", "best_model.zip")
+    #
+    #
+    # if os.path.exists(BEST_PPO_MODEL_PATH):
+    #     # --- 测试确定性模式 (检查是否集中分配) ---
+    #     print("\n" + "#" * 60)
+    #     print("### 模式一：Deterministic=True (集中分配检查) ###")
+    #     print("#" * 60)
+    #     test_agent_allocation(
+    #         model_path=BEST_PPO_MODEL_PATH,
+    #         algorithm_cls=PPO,
+    #         ES_list=ES_list,
+    #         client_list=client_list,
+    #         split_num_list=split_num_list,
+    #         model_type=model_type,
+    #         test_episodes=5,
+    #         deterministic=True,  # 检查只选一个ES的问题
+    #         bandwidth=bandwidth
+    #     )
+    #
+    #     # --- 测试随机模式 (检查负载均衡) ---
+    #     print("\n" + "#" * 60)
+    #     print("### 模式二：Deterministic=False (均衡分配检查) ###")
+    #     print("#" * 60)
+    #     test_agent_allocation(
+    #         model_path=BEST_PPO_MODEL_PATH,
+    #         algorithm_cls=PPO,
+    #         ES_list=ES_list,
+    #         client_list=client_list,
+    #         split_num_list=split_num_list,
+    #         model_type=model_type,
+    #         test_episodes=5,
+    #         deterministic=False,  # 检查是否能分散分配
+    #         bandwidth = bandwidth
+    #     )
+    # else:
+    #     print(f"❌ 最佳模型文件未找到: {BEST_PPO_MODEL_PATH}，请先运行训练。")
 
     print("对比初始GWO的分配方案：")
     print(init_dist)
     env = gymEnv.GymPPOEnv(ES_list, client_list, split_num_list, model_type=model_type, bandwidth=bandwidth)
-    init_time, client_time_list = env.calculate_makespan_for_allocation(init_dist)
-    print(f"初始分配方案的Makespan: {init_time}")
-    print(client_time_list)
-
+    init_time0, client_time_list0 = env.calculate_makespan_for_allocation(init_dist)
+    # test
+    data = [
+        [0, 1, 1, 1, 1, 0],
+        [0, 1, 1, 0, 1, 1],
+        [0, 1, 1, 1, 0, 1],
+    ]
+    # data = [
+    #     [0, 1, 1, 1, 1, 0],
+    #     [0, 1, 1, 1, 0, 1],
+    #     [0, 1, 1, 1, 0, 1],
+    #     [0, 1, 2, 0, 1, 0],
+    #     [0, 1, 0, 1, 1, 1],
+    #     [0, 0, 1, 1, 1, 1],
+    #     [0, 1, 1, 0, 1, 1],
+    #     [0, 1, 1, 1, 0, 1],
+    #     [0, 1, 2, 0, 1, 0],
+    #     [0, 1, 1, 0, 1, 1]
+    # ]
+    my_ndarray = np.array(data)
+    test_time, test_time_list = env.calculate_makespan_for_allocation(my_ndarray)
+    print(f"test time: {test_time:.4f}")
+    # init_time1, client_time_list1 = env.calculate_makespan_for_allocation(best_global_alloc1)
+    # init_time2, client_time_list2 = env.calculate_makespan_for_allocation(best_global_alloc2)
+    print(f"当前带宽: {bandwidth} MBps，当前数据集: {model_type}")
+    # print(f"RS+UO方法的Makespan: {avg_makespan1:.4f}")
+    # print(f"RS+GO方法的Makespan: {avg_makespan2:.4f}")
+    print(f"GWO矫正后的Makespan: {init_time0:.4f}")
+    # print(f"DQN矫正前的Makespan: {best_global_makespan1:.4f}")
+    # print(f"DQN矫正后Makespan: {init_time1:.4f}")
+    # print(best_global_alloc1)
+    # print(f"SAC矫正前的Makespan: {best_global_makespan2:.4f}")
+    # print(f"SAC矫正后Makespan: {init_time2:.4f}")
+    # print(best_global_alloc2)
+    # print(client_time_list)
+    # print(best_global_alloc)
 
     # 训练 SAC (例如 100,000 步)
     # sac_path = train_sac_agent(
